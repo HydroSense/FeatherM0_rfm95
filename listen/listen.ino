@@ -57,8 +57,10 @@ void setup()
   // The default transmitter power is 13dBm, using PA_BOOST.
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
   // you can set transmitter powers from 5 to 23 dBm:
-  rf95.setTxPower(23, false);
-
+  //rf95.setTxPower(23, false);
+  //actual preamble is x + 4.25 symbols.
+  rf95.setPreambleLength(6);
+  
   if (rf95.setModemConfig(rf95.Bw500Cr48Sf4096)){
     Serial.println("rf95 configuration set to BW=500 kHz, CR=4/8, SF=12.");
   }else{
@@ -157,18 +159,35 @@ void print_packet(struct rf_message *m)
   Serial.print(m->cr+4);
   Serial.print("Sf");
   Serial.print((int)pow(2,m->sf));
-  Serial.print("]: ");
-  Serial.print((char*)m->text);
-  
+  Serial.print("] ");
+
+  Serial.print("(sq=");
+  Serial.print(m->seqno);
+  Serial.print("): \"");
+
+  //ensure text buffer is null terminated.
+  char tbuf[17];
+  memcpy(tbuf, m->text, 16);
+  tbuf[16] = 0;  
+  Serial.print(tbuf);
+  Serial.print("\" ");
 }
-
-
 
 void loop()
 {  
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
+    struct RH_RF95::perf_counter* p = rf95.getPerf();
+    static uint32_t icount = 0;
 
+
+      Serial.print("CAD count ");
+      Serial.print(p->cad_cnt);      
+      Serial.print(", Rx timeout ");
+      Serial.print(p->rx_timeout);   
+      Serial.print(", Intterupts ");
+      Serial.println(p->interrupt_count);   
+    
     if (rf95.available())
     {      
        digitalWrite(13, HIGH);
@@ -182,13 +201,19 @@ void loop()
           
           Serial.print("RSSI: ");
           Serial.println(rf95.lastRssi(), DEC);
+
+//          Serial.print("RF Time: ");
+//          Serial.print(p->rx_done - p->cad_done);
+//          Serial.println(" ms.");
         }
         else
         {
           Serial.println("ERR: recv failed");
         }
         digitalWrite(13, LOW);       
-    } 
+    }
+
+    delay(500);
     
 }
 

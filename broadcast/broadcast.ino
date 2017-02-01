@@ -56,8 +56,11 @@ void setup()
   // The default transmitter power is 13dBm, using PA_BOOST.
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
   // you can set transmitter powers from 5 to 23 dBm:
-  rf95.setTxPower(5, false);
+  rf95.setTxPower(5);
 
+  //actual preamble is x + 4.25 symbols.
+  rf95.setPreambleLength(6);
+  
   if (rf95.setModemConfig(rf95.Bw500Cr48Sf4096)){
     Serial.println("rf95 configuration set to BW=500 kHz, CR=4/8, SF=12.");
   }else{
@@ -105,6 +108,7 @@ uint8_t* make_packet(struct rf_message *p, uint16_t seqno, const char *text)
   Serial.print("making packet ");
   Serial.println(seqno);
   memcpy(p->hw_address, hw_address, 6);
+  memcpy(p->text, text, 16);
   p->seqno = seqno;
   p->freq = rf95.getFrequency();
   p->bw = rf95.getBw();
@@ -142,7 +146,7 @@ void rf_state_machine()
   enum app_modes _last = app_mode;  
   switch (app_mode){
     case app_wait_to_send:
-      if (millis() - mode_timer > 11000){        
+      if (packetnum == 0 || (millis() - mode_timer > 1000)){        
 
         struct rf_message msg;           
         
@@ -162,6 +166,24 @@ void rf_state_machine()
         Serial.print("Send complete in ");
         Serial.print(millis() - mode_timer);
         Serial.println(" ms.");
+
+        struct RH_RF95::perf_counter* p = rf95.getPerf();
+
+        Serial.print("  -Sent ");
+        Serial.print(p->sent_bytes);
+        Serial.println(" bytes.");
+
+        Serial.print("  -Send overhead: ");
+        Serial.print(p->tx_mode - p->send_call);
+        Serial.println(" ms.");
+
+        Serial.print("  -Tx time: ");
+        Serial.print(p->interrupt - p->tx_mode);
+        Serial.println(" ms.");
+        
+        Serial.print("  -Interrupts: ");
+        Serial.println(p->interrupt_count);
+                        
         app_mode = app_wait_to_send;
         Serial.println("Waiting to send again.");
         digitalWrite(13, LOW);
