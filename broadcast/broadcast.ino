@@ -11,8 +11,9 @@
 
 PROGMEM static const uint8_t hw_address[] = {0x98,0x76,0xb6,0x5c,0x00,0x02};
 
+RHHardwareSPI zspi = RHHardwareSPI(RHGenericSPI::Frequency8MHz);
 // Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT); // Adafruit Feather M0 with RFM95 
+RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi); // Adafruit Feather M0 with RFM95 
 
 // Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
 //#define Serial SerialUSB
@@ -98,8 +99,10 @@ struct rf_message{
   /* 16 bytes */
   
   uint8_t text[16];
+  //uint8_t unused[32];
+  
   /* 16 bytes */  
-} __attribute__((packed));  // total is 32 bytes
+} __attribute__((packed));  // total is 32 bytes 
 
 uint8_t* make_packet(struct rf_message *p, uint16_t seqno, const char *text)
 {
@@ -151,18 +154,27 @@ void rf_state_machine()
         struct rf_message msg;           
         
         Serial.println("\nSending ...");
-                
-        if (rf95.send(make_packet(&msg, packetnum++, "hello world"), sizeof(msg))){
-          digitalWrite(13, HIGH);
-          app_mode = app_sending;
+             
+        //wait for any pending tx's to complete
+        rf95.waitPacketSent();
+
+        digitalWrite(13, HIGH); 
+
+        // fill the fifo
+        if(rf95.writefifo(make_packet(&msg, packetnum++, "hello world"), sizeof(msg))){
+          rf95.setModeTx();
         }else{
-          Serial.print("ERR: Send failed!");
+          Serial.println("ERR: could not writefifo.");
         }
+        
+        app_mode = app_sending;
+        
       }
       break;
 
     case app_sending:
       if (rf95.mode() != RHGenericDriver::RHModeTx){
+        digitalWrite(13, LOW);
         Serial.print("Send complete in ");
         Serial.print(millis() - mode_timer);
         Serial.println(" ms.");
@@ -186,7 +198,7 @@ void rf_state_machine()
                         
         app_mode = app_wait_to_send;
         Serial.println("Waiting to send again.");
-        digitalWrite(13, LOW);
+
       } else if (millis() - mode_timer > 5000){
         Serial.println("WARN: Send taking too long, reset radio.");
         digitalWrite(13, LOW);
