@@ -11,12 +11,18 @@
 
 PROGMEM static const uint8_t hw_address[] = {0x98,0x76,0xb6,0x5c,0x00,0x02};
 
+void on_rx(void);
 RHHardwareSPI zspi = RHHardwareSPI(RHGenericSPI::Frequency8MHz);
 // Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi); // Adafruit Feather M0 with RFM95 
+RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
 
 // Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
 //#define Serial SerialUSB
+
+// radio callback from handleInterrupt
+void on_rx(void){
+  // nothing to do.
+}
 
 void setup() 
 {
@@ -76,8 +82,9 @@ int mode_timer = 0;
 
 enum app_modes{
   app_wait_to_send=0,
-  app_sending,
-  app_wait_for_reply,  
+  app_sending_tr,
+  app_send_data,
+  app_sending_data,
 };
 
 enum app_modes app_mode = app_wait_to_send;
@@ -104,6 +111,12 @@ struct rf_message{
   /* 16 bytes */  
 } __attribute__((packed));  // total is 32 bytes 
 
+struct tr_message{
+  uint16_t a;
+  uint16_t b;
+  uint8_t  c;
+} __attribute__((packed));  // total is 5 bytes 
+
 uint8_t* make_packet(struct rf_message *p, uint16_t seqno, const char *text)
 {
   int i;
@@ -120,62 +133,51 @@ uint8_t* make_packet(struct rf_message *p, uint16_t seqno, const char *text)
   p->rssiDown = rf95.lastRssi();
   p->rssiUp = 0;
 
-  
   return (uint8_t*)p;
 }
-
-void print_packet(struct rf_message *m)
+uint8_t* make_tr_packet(struct tr_message *p, uint16_t seqno)
 {
   int i;
-  for (i=0;i<6;i++){
-    Serial.print(m->hw_address[i], HEX);
-    Serial.print(":");
-  }
-  Serial.print(" [");
-  Serial.print(m->freq);
-  Serial.print("MHz/Bw");
-  Serial.print(m->bw);
-  Serial.print("kHz/Cr4");
-  Serial.print(m->cr+4);
-  Serial.print("Sf");
-  Serial.print(pow(2,m->sf));
-  Serial.print("]: ");
-  Serial.print((char*)m->text);
   
+
+  // make up some contents
+  p->a = seqno & 0xff;
+  p->b = seqno;
+  p->c = 9; // number of data packets.
+  
+  Serial.print("making tr packet ");
+  Serial.println(p->c);
+  return (uint8_t*)p;
 }
 
 void rf_state_machine()
 {
   enum app_modes _last = app_mode;  
+  static uint8_t data_count = 0;
+  
   switch (app_mode){
     case app_wait_to_send:
-      if (packetnum == 0 || (millis() - mode_timer > 1000)){        
+      if (packetnum == 0 || (millis() - mode_timer > 10000)){        
 
-        struct rf_message msg;           
+        struct tr_message tr;
         
-        Serial.println("\nSending ...");
-             
-        //wait for any pending tx's to complete
-        rf95.waitPacketSent();
-
-        digitalWrite(13, HIGH); 
-
-        // fill the fifo
-        if(rf95.writefifo(make_packet(&msg, packetnum++, "hello world"), sizeof(msg))){
-          rf95.setModeTx();
+        rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+        rf95.setPayloadLength(5);
+        
+        if (rf95.send(make_tr_packet(&tr, packetnum++), sizeof(tr))){
+          app_mode = app_sending_tr;
         }else{
-          Serial.println("ERR: could not writefifo.");
+          Serial.println("ERR: could send TR.");
+          mode_timer = millis();
         }
-        
-        app_mode = app_sending;
-        
+        data_count = tr.c;
       }
       break;
 
-    case app_sending:
+    case app_sending_tr:
       if (rf95.mode() != RHGenericDriver::RHModeTx){
         digitalWrite(13, LOW);
-        Serial.print("Send complete in ");
+        Serial.print("Send TR complete in ");
         Serial.print(millis() - mode_timer);
         Serial.println(" ms.");
 
@@ -196,14 +198,69 @@ void rf_state_machine()
         Serial.print("  -Interrupts: ");
         Serial.println(p->interrupt_count);
                         
-        app_mode = app_wait_to_send;
-        Serial.println("Waiting to send again.");
+        app_mode = app_send_data;
+        
+        //switch to high rate mode
+        rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);
 
-      } else if (millis() - mode_timer > 5000){
-        Serial.println("WARN: Send taking too long, reset radio.");
-        digitalWrite(13, LOW);
-        app_mode = app_wait_to_send;
-      }
+        delay(15);
+                
+      }else if (millis() - mode_timer > 5000){
+          Serial.println("WARN: Send TR taking too long, reset radio.");
+          digitalWrite(13, LOW);
+          app_mode = app_wait_to_send;
+        }
+      break;
+    case app_send_data:
+    
+        struct rf_message msg;       
+             
+        digitalWrite(13, HIGH); 
+                
+        if(rf95.send(make_packet(&msg, packetnum++, "hello world"), sizeof(msg))){          
+          app_mode = app_sending_data;
+        }else{
+          Serial.println("ERR: could not writefifo.");
+          app_mode = app_sending_data;
+        }
+        
+
+      break;
+    case app_sending_data:
+      if (rf95.mode() != RHGenericDriver::RHModeTx){
+          digitalWrite(13, LOW);
+          Serial.print("Send data complete in ");
+          Serial.print(millis() - mode_timer);
+          Serial.println(" ms.");
+  
+          struct RH_RF95::perf_counter* p = rf95.getPerf();
+  
+          Serial.print("  -Sent ");
+          Serial.print(p->sent_bytes);
+          Serial.println(" bytes.");
+  
+          Serial.print("  -Send overhead: ");
+          Serial.print(p->tx_mode - p->send_call);
+          Serial.println(" ms.");
+  
+          Serial.print("  -Tx time: ");
+          Serial.print(p->interrupt - p->tx_mode);
+          Serial.println(" ms.");
+          
+          Serial.print("  -Interrupts: ");
+          Serial.println(p->interrupt_count);
+
+          if (--data_count > 0){
+            app_mode = app_send_data;           
+          }else{
+            app_mode = app_wait_to_send;
+          }          
+  
+        } else if (millis() - mode_timer > 5000){
+          Serial.println("WARN: Send data taking too long, reset radio.");
+          digitalWrite(13, LOW);
+          app_mode = app_wait_to_send;
+        }
       break;
     
     default:

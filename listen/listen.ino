@@ -12,64 +12,14 @@
 
 PROGMEM static const uint8_t hw_address[] = {0x98,0x76,0xb6,0x5c,0x00,0x01};
 
+void on_rx(void); //forward declaration of rx handler
+RHHardwareSPI zspi = RHHardwareSPI(RHGenericSPI::Frequency8MHz);
 // Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT); // Adafruit Feather M0 with RFM95 
+RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
 
 // Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
 //#define Serial SerialUSB
 
-void setup() 
-{
-  pinMode(13, OUTPUT);
-  digitalWrite(13, LOW);
-  pinMode(VBATPIN, INPUT);
-  
-  // un-reset the radio
-  pinMode(RFM95_RST, OUTPUT);
-  digitalWrite(RFM95_RST, HIGH);
-
-  Serial.begin(57600);
-  while (!Serial) ; // Wait for serial port to be available (does not boot headless!)
-  if (!rf95.init()){
-    Serial.println("init failed");
-    
-    while (1);
-  }
-  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
-  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
-  if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("setFrequency failed"); 
-    while (1);
-  }
-  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
-
-
-  // The default transmitter power is 13dBm, using PA_BOOST.
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
-  // you can set transmitter powers from 5 to 23 dBm:
-//  driver.setTxPower(23, false);
-  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
-  // transmitter RFO pins and not the PA_BOOST pins
-  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
-  // Failure to do that will result in extremely low transmit powers.
-//  driver.setTxPower(14, true);
-
-  // The default transmitter power is 13dBm, using PA_BOOST.
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
-  // you can set transmitter powers from 5 to 23 dBm:
-  //rf95.setTxPower(23, false);
-  //actual preamble is x + 4.25 symbols.
-  rf95.setPreambleLength(6);
-  
-  if (rf95.setModemConfig(rf95.Bw500Cr48Sf4096)){
-    Serial.println("rf95 configuration set to BW=500 kHz, CR=4/8, SF=12.");
-  }else{
-    Serial.println("rf95 configuration failed.");
-    while (1);
-  }
-
-  Serial.println("Listening for packets...");
-}
 
 int packetnum = 0;
 int mode_timer = 0;
@@ -102,24 +52,71 @@ struct rf_message{
   /* 16 bytes */  
 } __attribute__((packed));  // total is 32 bytes
 
-uint8_t* make_packet(struct rf_message *p, uint16_t seqno, const char *text)
-{
-  int i;
-  
-  Serial.print("making packet ");
-  Serial.println(seqno);
-  memcpy(p->hw_address, hw_address, 6);
-  p->seqno = seqno;
-  p->freq = rf95.getFrequency();
-  p->bw = rf95.getBw();
-  p->sf = rf95.getSf();
-  p->cr = rf95.getCr();
-  p->rssiDown = rf95.lastRssi();
-  p->rssiUp = 0;
+struct tr_message{
+  uint16_t a;
+  uint16_t b;
+  uint8_t  c; // c is how many data packets to expect
+} __attribute__((packed));  // total is 5 bytes 
 
-  
-  return (uint8_t*)p;
+
+volatile static uint8_t have_tr = 0;
+static uint8_t data_count= 0;
+static uint32_t data_time = 0;
+
+// radio rx callback
+void on_rx(void){  
+  //not needed
 }
+
+void setup() 
+{
+  pinMode(13, OUTPUT);
+  digitalWrite(13, LOW);
+  pinMode(VBATPIN, INPUT);
+  
+  // un-reset the radio
+  pinMode(RFM95_RST, OUTPUT);
+  digitalWrite(RFM95_RST, HIGH);
+
+  Serial.begin(57600);
+  while (!Serial) ; // Wait for serial port to be available (does not boot headless!)
+  if (!rf95.init()){
+    Serial.println("init failed");
+    
+    while (1);
+  }
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
+  if (!rf95.setFrequency(RF95_FREQ)) {
+    Serial.println("setFrequency failed"); 
+    while (1);
+  }
+  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
+
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
+//  driver.setTxPower(23, false);
+  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
+  // transmitter RFO pins and not the PA_BOOST pins
+  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
+  // Failure to do that will result in extremely low transmit powers.
+//  driver.setTxPower(14, true);
+
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
+  //rf95.setTxPower(23, false);
+  //actual preamble is x + 4.25 symbols.
+  rf95.setPreambleLength(6);
+
+  //setup to receive a TR message
+  rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+  rf95.setPayloadLength(5);  
+
+  Serial.println("Listening for packets...");
+}
+
 
 void print_packet(struct rf_message *m)
 {
@@ -177,43 +174,93 @@ void loop()
 {  
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
-    struct RH_RF95::perf_counter* p = rf95.getPerf();
-    static uint32_t icount = 0;
 
-
-      Serial.print("CAD count ");
-      Serial.print(p->cad_cnt);      
-      Serial.print(", Rx timeout ");
-      Serial.print(p->rx_timeout);   
-      Serial.print(", Intterupts ");
-      Serial.println(p->interrupt_count);   
     
-    if (rf95.available())
-    {      
-       digitalWrite(13, HIGH);
-       if (rf95.recv(buf, &len))
-       {
-          Serial.print("RX [");
-          Serial.print(len);
-          Serial.print("]: ");
+//    struct RH_RF95::perf_counter* p = rf95.getPerf();
+//    static uint32_t icount = 0;
+//
+//      Serial.print("CAD count ");
+//      Serial.print(p->cad_cnt);      
+//      Serial.print(", Rx timeout ");
+//      Serial.print(p->rx_timeout);   
+//      Serial.print(", Intterupts ");
+//      Serial.println(p->interrupt_count);   
 
-          print_packet((struct rf_message *)buf);
+    if (have_tr == 0){
+      // wait for a TR message
+      if (rf95.available())
+      {     
+         // assume we got a tr, setup for data
+         //switch to high rate mode, the data message comes immediately
+         rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);    
+         rf95.setModeRx();
+         
+         digitalWrite(13, HIGH);
+         if (rf95.recv(buf, &len)){
+            struct tr_message *tr;
+            tr = (struct tr_message*)&buf[0];
+            Serial.print("RX [TR]: ");
+            Serial.print(tr->a);
+            Serial.print(", ");
+            Serial.print(tr->b);
+            Serial.print(", ");
+            Serial.print(tr->c);
+
+
+            Serial.print("  RSSI: ");
+            Serial.println(rf95.lastRssi(), DEC);
+            have_tr = 1;
+            data_count = tr->c;   
+            data_time =millis();
+         }else{
+            Serial.println("ERR: recv failed");
+         }
+         digitalWrite(13, LOW); 
+      }
           
-          Serial.print("RSSI: ");
-          Serial.println(rf95.lastRssi(), DEC);
+    }else{
+      // wait for Data messages
+      if (millis() - data_time > 3000){
+        Serial.println("Timeout waiting for data.");
+        have_tr= 0;
+        rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+        rf95.setPayloadLength(5);       
+        rf95.setModeRx();
+      }
+      if (rf95.available())
+      { 
+         if(--data_count==0){ 
+            //switch back to waiting for tr's before we get the packet.
+            have_tr = 0;    
+            rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+            rf95.setPayloadLength(5);       
+            rf95.setModeRx();
+         }
+                     
+         digitalWrite(13, HIGH);
+         if (rf95.recv(buf, &len))
+         {
+            Serial.print("RX [");
+            Serial.print(len);
+            Serial.print("]: ");
+  
+            print_packet((struct rf_message *)buf);
+            
+            Serial.print("RSSI: ");
+            Serial.println(rf95.lastRssi(), DEC);
+  
+  //          Serial.print("RF Time: ");
+  //          Serial.print(p->rx_done - p->cad_done);
+  //          Serial.println(" ms.");        
+          }
+          else
+          {
+            Serial.println("ERR: recv failed");
+          }
 
-//          Serial.print("RF Time: ");
-//          Serial.print(p->rx_done - p->cad_done);
-//          Serial.println(" ms.");
-        }
-        else
-        {
-          Serial.println("ERR: recv failed");
-        }
-        digitalWrite(13, LOW);       
+          digitalWrite(13, LOW);       
+      }
     }
-
-    delay(500);
     
 }
 
