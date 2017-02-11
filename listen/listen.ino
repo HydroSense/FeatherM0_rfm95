@@ -5,6 +5,7 @@
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 3
+#define RFM95_FHSS_INT 5
 
 #define RF95_FREQ 915.0
 
@@ -15,7 +16,7 @@ PROGMEM static const uint8_t hw_address[] = {0x98,0x76,0xb6,0x5c,0x00,0x01};
 void on_rx(void); //forward declaration of rx handler
 RHHardwareSPI zspi = RHHardwareSPI(RHGenericSPI::Frequency8MHz);
 // Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
+RH_RF95 rf95(RFM95_CS, RFM95_INT, RFM95_FHSS_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
 
 // Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
 //#define Serial SerialUSB
@@ -85,34 +86,16 @@ void setup()
     
     while (1);
   }
-  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
-  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
-  if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("setFrequency failed"); 
-    while (1);
-  }
-  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
 
-  // The default transmitter power is 13dBm, using PA_BOOST.
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
-  // you can set transmitter powers from 5 to 23 dBm:
-//  driver.setTxPower(23, false);
-  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
-  // transmitter RFO pins and not the PA_BOOST pins
-  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
-  // Failure to do that will result in extremely low transmit powers.
-//  driver.setTxPower(14, true);
-
-  // The default transmitter power is 13dBm, using PA_BOOST.
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
-  // you can set transmitter powers from 5 to 23 dBm:
-  //rf95.setTxPower(23, false);
   //actual preamble is x + 4.25 symbols.
   rf95.setPreambleLength(6);
 
   //setup to receive a TR message
   rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
   rf95.setPayloadLength(5);  
+
+  // confgiure FHSS for < 400 ms dwell time.
+  rf95.configureFhss(400);
 
   Serial.println("Listening for packets...");
 }
@@ -193,6 +176,7 @@ void loop()
          // assume we got a tr, setup for data
          //switch to high rate mode, the data message comes immediately
          rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);    
+         rf95.configureFhss(400);
          rf95.setModeRx();
          
          digitalWrite(13, HIGH);
@@ -224,6 +208,7 @@ void loop()
         Serial.println("Timeout waiting for data.");
         have_tr= 0;
         rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+        rf95.configureFhss(400);
         rf95.setPayloadLength(5);       
         rf95.setModeRx();
       }
@@ -233,6 +218,7 @@ void loop()
             //switch back to waiting for tr's before we get the packet.
             have_tr = 0;    
             rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+            rf95.configureFhss(400);            
             rf95.setPayloadLength(5);       
             rf95.setModeRx();
          }

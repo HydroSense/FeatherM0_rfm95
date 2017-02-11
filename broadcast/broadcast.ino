@@ -4,6 +4,7 @@
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 3
+#define RFM95_FHSS_INT 5
 
 #define RF95_FREQ 915.0
 
@@ -14,7 +15,7 @@ PROGMEM static const uint8_t hw_address[] = {0x98,0x76,0xb6,0x5c,0x00,0x02};
 void on_rx(void);
 RHHardwareSPI zspi = RHHardwareSPI(RHGenericSPI::Frequency8MHz);
 // Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
+RH_RF95 rf95(RFM95_CS, RFM95_INT,RFM95_FHSS_INT, zspi, &on_rx); // Adafruit Feather M0 with RFM95 
 
 // Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
 //#define Serial SerialUSB
@@ -41,24 +42,6 @@ void setup()
     
     while (1);
   }
-  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
-  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
-  if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("setFrequency failed"); 
-    while (1);
-  }
-  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
-
-
-  // The default transmitter power is 13dBm, using PA_BOOST.
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
-  // you can set transmitter powers from 5 to 23 dBm:
-//  driver.setTxPower(23, false);
-  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
-  // transmitter RFO pins and not the PA_BOOST pins
-  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
-  // Failure to do that will result in extremely low transmit powers.
-//  driver.setTxPower(14, true);
 
   // The default transmitter power is 13dBm, using PA_BOOST.
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
@@ -74,6 +57,9 @@ void setup()
     Serial.println("rf95 configuration failed.");
     while (1);
   }
+
+  // confgiure FHSS for < 400 ms dwell time.
+  rf95.configureFhss(400);
 
 }
 
@@ -139,7 +125,6 @@ uint8_t* make_tr_packet(struct tr_message *p, uint16_t seqno)
 {
   int i;
   
-
   // make up some contents
   p->a = seqno & 0xff;
   p->b = seqno;
@@ -162,7 +147,10 @@ void rf_state_machine()
         struct tr_message tr;
         
         rf95.setModemConfig(RH_RF95::Bw500Cr48Sf4096NoHeadNoCrc);
+        rf95.configureFhss(400);
         rf95.setPayloadLength(5);
+        Serial.print("Computed air time: ");
+        Serial.println(rf95.getTimeOnAir(sizeof(tr)));
         
         if (rf95.send(make_tr_packet(&tr, packetnum++), sizeof(tr))){
           app_mode = app_sending_tr;
@@ -202,7 +190,8 @@ void rf_state_machine()
         
         //switch to high rate mode
         rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);
-
+        rf95.configureFhss(400);
+        
         delay(15);
                 
       }else if (millis() - mode_timer > 5000){
@@ -216,8 +205,11 @@ void rf_state_machine()
         struct rf_message msg;       
              
         digitalWrite(13, HIGH); 
-                
+
+                        
         if(rf95.send(make_packet(&msg, packetnum++, "hello world"), sizeof(msg))){          
+          Serial.print("Computed air time: ");
+          Serial.println(rf95.getTimeOnAir(sizeof(msg)));          
           app_mode = app_sending_data;
         }else{
           Serial.println("ERR: could not writefifo.");
